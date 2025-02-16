@@ -1,0 +1,54 @@
+# all logs
+logs/*
+
+# all node_modules
+node_modules/*
+
+# all dist
+dist/*
+
+# all .env
+.env*
+
+# all .DS_Store
+.DS_Store
+
+# all folders named lightning_logs
+lightning_logs/
+
+# all folders named tensorboard_logs
+tensorboard_logs/
+
+# all folders named wandb_logs
+wandb_logs/
+
+# MNIST
+MNIST/
+
+# CIFAR10
+CIFAR10/
+
+# CIFAR100
+CIFAR100/
+
+# USPS
+USPS/
+
+# runs
+runs/
+
+# wandb
+wandb/
+
+# tensorboard
+tensorboard/
+
+# pycache
+__pycache__/
+
+# .pth files
+*.pth
+
+# .pt files
+*.pt
+
