@@ -97,109 +97,109 @@ class BinningMI(MutualInformationEstimator):
                 
         return mi_matrix
 
-class RFFMI(MutualInformationEstimator):
-    """
-    Mutual Information estimation using Random Fourier Features (RFF) for kernel-based dependence measurement.
+# class RFFMI(MutualInformationEstimator):
+#     """
+#     Mutual Information estimation using Random Fourier Features (RFF) for kernel-based dependence measurement.
     
-    This estimator computes a kernel-based dependence measure using the Hilbert-Schmidt Independence
-    Criterion (HSIC) between variables. The gamma parameter is determined using a median heuristic:
-        gamma = 1.0 / (2 * median(pairwise squared distances)).
+#     This estimator computes a kernel-based dependence measure using the Hilbert-Schmidt Independence
+#     Criterion (HSIC) between variables. The gamma parameter is determined using a median heuristic:
+#         gamma = 1.0 / (2 * median(pairwise squared distances)).
     
-    Random Fourier features are used to approximate a Gaussian kernel (with variance 1/(2*gamma)).
+#     Random Fourier features are used to approximate a Gaussian kernel (with variance 1/(2*gamma)).
     
-    Note:
-      - The returned value from compute_pairwise_mi is the squared Frobenius norm of the cross-covariance matrix
-        between the RFF projections of pairs of variables. It does not have a direct conversion to mutual information.
-      - For univariate inputs, an extra dimension is automatically added.
-    """
-    def __init__(self, samples: torch.Tensor, n_features: int = 100):
-        super().__init__(samples)
-        self.n_features = n_features
-        self.gamma = self._median_heuristic()
+#     Note:
+#       - The returned value from compute_pairwise_mi is the squared Frobenius norm of the cross-covariance matrix
+#         between the RFF projections of pairs of variables. It does not have a direct conversion to mutual information.
+#       - For univariate inputs, an extra dimension is automatically added.
+#     """
+#     def __init__(self, samples: torch.Tensor, n_features: int = 100):
+#         super().__init__(samples)
+#         self.n_features = n_features
+#         self.gamma = self._median_heuristic()
 
-    def _median_heuristic(self):
-        """Compute gamma using the median heuristic.
+#     def _median_heuristic(self):
+#         """Compute gamma using the median heuristic.
         
-        It computes the squared pairwise distances between samples and sets:
-            gamma = 1.0 / (2 * median(pairwise squared distances))
-        """
-        pairwise_dists = torch.cdist(self.samples, self.samples)**2
-        return 1.0 / (2 * torch.median(pairwise_dists))
+#         It computes the squared pairwise distances between samples and sets:
+#             gamma = 1.0 / (2 * median(pairwise squared distances))
+#         """
+#         pairwise_dists = torch.cdist(self.samples, self.samples)**2
+#         return 1.0 / (2 * torch.median(pairwise_dists))
 
-    def _compute_rff(self, x: torch.Tensor) -> torch.Tensor:
-        # Ensure x is 2D; if univariate, add an extra dimension
-        if x.dim() == 1:
-            x = x.unsqueeze(1)
-        w = torch.randn(x.shape[1], self.n_features, device=x.device)
-        w *= math.sqrt(2 * self.gamma)
-        b = torch.rand(self.n_features, device=x.device) * 2 * math.pi
-        return torch.cos(x @ w + b) * math.sqrt(2.0/self.n_features)
+#     def _compute_rff(self, x: torch.Tensor) -> torch.Tensor:
+#         # Ensure x is 2D; if univariate, add an extra dimension
+#         if x.dim() == 1:
+#             x = x.unsqueeze(1)
+#         w = torch.randn(x.shape[1], self.n_features, device=x.device)
+#         w *= math.sqrt(2 * self.gamma)
+#         b = torch.rand(self.n_features, device=x.device) * 2 * math.pi
+#         return torch.cos(x @ w + b) * math.sqrt(2.0/self.n_features)
 
-    def _compute_kmi(self, x: torch.Tensor, y: torch.Tensor) -> float:
-        """Compute kernel mutual information using Random Fourier Features (RFF).
+#     def _compute_kmi(self, x: torch.Tensor, y: torch.Tensor) -> float:
+#         """Compute kernel mutual information using Random Fourier Features (RFF).
         
-        This method uses RFF to approximate the Gaussian kernel for x and y, computes the covariance matrices,
-        and then performs a whitening procedure to obtain canonical correlations. Assuming a Gaussian model in
-        the RFF feature space, the mutual information is estimated as:
-            MI = -0.5 * sum(log(1 - rho^2))
-        where rho are the canonical correlations.
-        """
-        # Compute random Fourier features for x and y.
-        z_x = self._compute_rff(x)
-        z_y = self._compute_rff(y)
-        n = self.n_samples
-        device = self.samples.device
-        eps = 1e-6
-        I = torch.eye(self.n_features, device=device)
+#         This method uses RFF to approximate the Gaussian kernel for x and y, computes the covariance matrices,
+#         and then performs a whitening procedure to obtain canonical correlations. Assuming a Gaussian model in
+#         the RFF feature space, the mutual information is estimated as:
+#             MI = -0.5 * sum(log(1 - rho^2))
+#         where rho are the canonical correlations.
+#         """
+#         # Compute random Fourier features for x and y.
+#         z_x = self._compute_rff(x)
+#         z_y = self._compute_rff(y)
+#         n = self.n_samples
+#         device = self.samples.device
+#         eps = 1e-6
+#         I = torch.eye(self.n_features, device=device)
 
-        # Estimate covariance matrices; add regularization for numerical stability.
-        C_x = (z_x.T @ z_x) / n + eps * I
-        C_y = (z_y.T @ z_y) / n + eps * I
-        C_xy = (z_x.T @ z_y) / n
+#         # Estimate covariance matrices; add regularization for numerical stability.
+#         C_x = (z_x.T @ z_x) / n + eps * I
+#         C_y = (z_y.T @ z_y) / n + eps * I
+#         C_xy = (z_x.T @ z_y) / n
 
-        # Perform Cholesky decompositions.
-        L_x = torch.linalg.cholesky(C_x)
-        L_y = torch.linalg.cholesky(C_y)
-        inv_L_x = torch.linalg.inv(L_x)
-        inv_L_y = torch.linalg.inv(L_y)
+#         # Perform Cholesky decompositions.
+#         L_x = torch.linalg.cholesky(C_x)
+#         L_y = torch.linalg.cholesky(C_y)
+#         inv_L_x = torch.linalg.inv(L_x)
+#         inv_L_y = torch.linalg.inv(L_y)
 
-        # Whiten the cross-covariance.
-        M = inv_L_x.T @ C_xy @ inv_L_y
+#         # Whiten the cross-covariance.
+#         M = inv_L_x.T @ C_xy @ inv_L_y
 
-        # Use SVD to get canonical correlations.
-        U, s, V = torch.linalg.svd(M)
-        s = torch.clamp(s, max=0.9999)
-        mi_value = -0.5 * torch.sum(torch.log(1 - s**2 + 1e-10))
-        return mi_value.item()
+#         # Use SVD to get canonical correlations.
+#         U, s, V = torch.linalg.svd(M)
+#         s = torch.clamp(s, max=0.9999)
+#         mi_value = -0.5 * torch.sum(torch.log(1 - s**2 + 1e-10))
+#         return mi_value.item()
 
-    def compute_pairwise_mi(self) -> torch.Tensor:
-        """Compute pairwise kernel mutual information between all variable pairs using random Fourier features.
+#     def compute_pairwise_mi(self) -> torch.Tensor:
+#         """Compute pairwise kernel mutual information between all variable pairs using random Fourier features.
         
-        Returns:
-            A symmetric matrix of shape (n_variables, n_variables) where the (i, j)-th entry
-            is the estimated mutual information computed from the canonical correlations of the RFF projections
-            for the i-th and j-th variables.
+#         Returns:
+#             A symmetric matrix of shape (n_variables, n_variables) where the (i, j)-th entry
+#             is the estimated mutual information computed from the canonical correlations of the RFF projections
+#             for the i-th and j-th variables.
         
-        Note:
-            The estimator assumes a Gaussian model in the RFF-induced feature space and computes:
-                MI = -0.5 * sum(log(1 - rho^2))
-            where rho are the canonical correlations.
-        """
-        mi_matrix = torch.zeros((self.n_variables, self.n_variables), device=self.samples.device)
+#         Note:
+#             The estimator assumes a Gaussian model in the RFF-induced feature space and computes:
+#                 MI = -0.5 * sum(log(1 - rho^2))
+#             where rho are the canonical correlations.
+#         """
+#         mi_matrix = torch.zeros((self.n_variables, self.n_variables), device=self.samples.device)
         
-        for i in range(self.n_variables):
-            for j in range(i + 1, self.n_variables):
-                # Extract individual variable data.
-                x_i = self.samples[:, i]
-                x_j = self.samples[:, j]
-                # Ensure the variables are 2D (for univariate data, add an extra dimension)
-                if x_i.dim() == 1:
-                    x_i = x_i.unsqueeze(1)
-                if x_j.dim() == 1:
-                    x_j = x_j.unsqueeze(1)
+#         for i in range(self.n_variables):
+#             for j in range(i + 1, self.n_variables):
+#                 # Extract individual variable data.
+#                 x_i = self.samples[:, i]
+#                 x_j = self.samples[:, j]
+#                 # Ensure the variables are 2D (for univariate data, add an extra dimension)
+#                 if x_i.dim() == 1:
+#                     x_i = x_i.unsqueeze(1)
+#                 if x_j.dim() == 1:
+#                     x_j = x_j.unsqueeze(1)
                 
-                mi_val = self._compute_kmi(x_i, x_j)
-                mi_matrix[i, j] = mi_val
-                mi_matrix[j, i] = mi_val
+#                 mi_val = self._compute_kmi(x_i, x_j)
+#                 mi_matrix[i, j] = mi_val
+#                 mi_matrix[j, i] = mi_val
                 
-        return mi_matrix
+#         return mi_matrix
