@@ -1,11 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-import math
-import copy
-import numpy as np
 import os
+import math
 
 
 BASELINE_MODEL_NUMBER_OF_LAYERS = 6
@@ -177,50 +174,79 @@ class Transformer(nn.Module):
         # Generate output probabilities
         return self.generator(decoder_output)
 
-    def greedy_decode(self, src, src_mask=None, max_len=100, start_symbol=None):
+    def greedy_decode(
+        self, src, src_mask=None, max_len=100, start_symbol=None, eos_token=None
+    ):
         """
-        Greedy decoding for inference.
+        Greedy decoding for inference with early stopping based on EOS.
 
         Args:
             src (Tensor): Source token indices [batch_size, src_seq_len]
             src_mask (Tensor, optional): Mask for source padding [batch_size, 1, src_seq_len]
             max_len (int, optional): Maximum decoding length. Default: 100
-            start_symbol (int, optional): Start symbol index. Default: None
+            start_symbol (int, optional): Start symbol index. Default: None, which is set to 0.
+            eos_token (int, optional): EOS token index. If None, decoding will not perform early stopping.
 
         Returns:
-            Tensor: Generated output sequence [batch_size, out_seq_len]
+            List[List[int]]: A list (per batch element) of predicted token indices, truncated at EOS token (if encountered).
         """
         if start_symbol is None:
             # Default to using the BOS token index as the start symbol
-            # This assumes the BOS token is the first special token in the vocabulary
-            start_symbol = 0  # This should be replaced with the actual BOS token index
+            start_symbol = 0  # Replace with actual BOS token index if needed
+        if eos_token is None:
+            # Optionally set a default EOS token index; adjust as necessary for your vocabulary.
+            eos_token = 1
 
         batch_size = src.size(0)
         device = src.device
 
-        # Encode the source sequence
+        # Encode source sequence
         memory = self.encode(src, src_mask)
 
         # Initialize the decoder input with the start symbol
-        ys = torch.ones(batch_size, 1).fill_(start_symbol).long().to(device)
+        ys = torch.ones(batch_size, 1, dtype=torch.long, device=device).fill_(
+            start_symbol
+        )
 
-        # Iteratively generate each token
+        # A flag to indicate for each sentence if the EOS token has been generated
+        finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
+
         for i in range(max_len - 1):
             # Create a mask for previously generated tokens
             tgt_mask = self._generate_square_subsequent_mask(ys.size(1)).to(device)
 
             # Decode next token
             out = self.decode(ys, memory, tgt_mask, src_mask)
-
-            # Get probabilities and select the most likely token
+            # Get log probabilities for the last time step
             prob = self.generator(out[:, -1])
+            # Find the highest probability token
             _, next_word = torch.max(prob, dim=1)
 
-            # Append to the sequence
+            # For any sentence that has finished generating (i.e. already produced EOS),
+            # force the next word to remain the EOS token.
+            next_word = torch.where(
+                finished, torch.tensor(eos_token, device=device), next_word
+            )
             next_word = next_word.unsqueeze(1)
-            ys = torch.cat([ys, next_word], dim=1)
 
-        return ys
+            # Append the chosen token and update finished flags
+            ys = torch.cat([ys, next_word], dim=1)
+            finished |= next_word.squeeze(1) == eos_token
+
+            # If all sentences have generated the EOS token, stop early
+            if finished.all():
+                break
+
+        # Post-process each sequence: truncate after the first EOS token (if any)
+        ys_list = []
+        ys_cpu = ys.cpu().tolist()
+        for seq in ys_cpu:
+            if eos_token in seq:
+                eos_index = seq.index(eos_token) + 1
+                seq = seq[:eos_index]
+            ys_list.append(seq)
+
+        return ys_list
 
     def _generate_square_subsequent_mask(self, sz):
         """
@@ -311,12 +337,12 @@ class Encoder(nn.Module):
     def __init__(self, encoder_layer, num_layers):
         super().__init__()
 
-        assert isinstance(
-            encoder_layer, EncoderLayer
-        ), f"encoder_layer must be an instance of EncoderLayer, got {type(encoder_layer)}"
-        assert (
-            isinstance(num_layers, int) and num_layers > 0
-        ), f"num_layers must be a positive integer, got {num_layers}"
+        assert isinstance(encoder_layer, EncoderLayer), (
+            f"encoder_layer must be an instance of EncoderLayer, got {type(encoder_layer)}"
+        )
+        assert isinstance(num_layers, int) and num_layers > 0, (
+            f"num_layers must be a positive integer, got {num_layers}"
+        )
 
         self.encoder_layers = nn.ModuleList([encoder_layer for _ in range(num_layers)])
         self.norm = nn.LayerNorm(encoder_layer.model_dimension)
@@ -470,7 +496,6 @@ class DecoderLayer(nn.Module):
         src_mask=None,
         target_mask=None,
     ):
-
         # ---- Define the lambda functions for the attention layers ----
 
         # Alias src_representations_batch as srb for a concise reference.
@@ -497,16 +522,16 @@ class DecoderLayer(nn.Module):
         )
 
         # ---- Start the forward pass, starting from the first attention layer ----
-        print("Starting forward pass for decoder layer")
+        # print("Starting forward pass for decoder layer")
 
-        print("Shape of target mask:", target_mask.shape)
+        # print("Shape of target mask:", target_mask.shape)
 
         # Apply the first self-attention layer, followed by the first sublayer norm dropout + residual connection
         target_representations_batch = self.sublayers[0](
             target_representations_batch, decoder_target_self_attn
         )
 
-        print("Completed first sublayer")
+        # print("Completed first sublayer")
 
         # Apply the second self-attention layer, followed by the sublayer similarly.
         # Here the lambda function corresponds to the encoder-decoder cross-attention.
@@ -514,14 +539,14 @@ class DecoderLayer(nn.Module):
             target_representations_batch, decoder_target_cross_attn
         )
 
-        print("Completed second sublayer")
+        # print("Completed second sublayer")
 
         # Apply the feed-forward network, followed by the third sublayer norm dropout + residual connection
         target_representations_batch = self.sublayers[2](
             target_representations_batch, self.feed_forward
         )
 
-        print("Completed third sublayer")
+        # print("Completed third sublayer")
 
         # Return the final output
         return target_representations_batch
@@ -540,7 +565,6 @@ class Decoder(nn.Module):
         target_mask=None,
         src_mask=None,
     ):
-
         # forward pass through the decoder layers
         for layer in self.decoder_layers:
             # target_mask is used to prevent the model from attending to future tokens by
@@ -675,11 +699,11 @@ class ScaledDotProductAttention(nn.Module):
         # matmul: (batch_size, num_heads, seq_len, d_k) x (batch_size, num_heads, d_k, seq_len)
         # result: (batch_size, num_heads, seq_len, seq_len)
         scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
-        print("scores shape:", scores.shape)
+        # print("scores shape:", scores.shape)
 
         # Apply mask if provided - set masked positions to -inf before softmax
         # mask shape = (B, 1, 1, S) or (B, 1, T, T) will get broad-casted (copied) as needed to match scores shape
-        print("mask shape:", mask.shape)
+        # print("mask shape:", mask.shape)
         if mask is not None:
             scores = scores.masked_fill_(mask == torch.tensor(False), -1e9)
 
@@ -792,9 +816,9 @@ class Embedding(nn.Module):
         Returns:
             torch.Tensor: A tensor of shape (batch_size, sequence_length, d_model) containing the embedded tokens.
         """
-        assert (
-            x.dim() == 2
-        ), f"x must be a 2D tensor, got {x.dim()}D"  # Embed the input tokens
+        assert x.dim() == 2, (
+            f"x must be a 2D tensor, got {x.dim()}D"
+        )  # Embed the input tokens
 
         embedded = self.embedding(x)
 
@@ -841,12 +865,13 @@ class PositionalEncoding(nn.Module):
         self.register_buffer("pe", pe)
 
     def forward(self, batch_embeddings):
-
         # check for valid input dimensions
         assert (
             batch_embeddings.ndim == 3
             and batch_embeddings.shape[-1] == self.pe.shape[1]
-        ), f"Expected (batch size, max token sequence length, model dimension) got {batch_embeddings.shape}"
+        ), (
+            f"Expected (batch size, max token sequence length, model dimension) got {batch_embeddings.shape}"
+        )
 
         # Batch embeddings has shape (batch_size, max_seq_length, model_dimension)
         # where max_seq_length is the maximum sequence length of the batch (max out of source or target sequences)
@@ -854,8 +879,8 @@ class PositionalEncoding(nn.Module):
         # which is broadcastable to the batch embeddings (batch_size, max_seq_length, model_dimension)
         positional_encoding = self.pe[: batch_embeddings.size(1)]
 
-        print("positional_encoding shape:", positional_encoding.shape)
-        print("batch_embeddings shape:", batch_embeddings.shape)
+        # print("positional_encoding shape:", positional_encoding.shape)
+        # print("batch_embeddings shape:", batch_embeddings.shape)
 
         # Add positional encoding to input embeddings with broadcasting from (max_seq_length, model_dimension) to (batch_size, max_seq_length, model_dimension)
         batch_embeddings = batch_embeddings + positional_encoding
