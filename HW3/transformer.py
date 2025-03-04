@@ -151,7 +151,7 @@ class Transformer(nn.Module):
         tgt_embeddings = self.positional_encoding(tgt_embeddings)
 
         # Pass through decoder stack
-        return self.decoder(tgt_embeddings, memory, tgt_mask, src_mask)
+        return self.decoder(tgt_embeddings, memory, src_mask, tgt_mask)
 
     def forward(self, src, tgt, src_mask=None, tgt_mask=None):
         """
@@ -497,11 +497,16 @@ class DecoderLayer(nn.Module):
         )
 
         # ---- Start the forward pass, starting from the first attention layer ----
+        print("Starting forward pass for decoder layer")
+
+        print("Shape of target mask:", target_mask.shape)
 
         # Apply the first self-attention layer, followed by the first sublayer norm dropout + residual connection
         target_representations_batch = self.sublayers[0](
             target_representations_batch, decoder_target_self_attn
         )
+
+        print("Completed first sublayer")
 
         # Apply the second self-attention layer, followed by the sublayer similarly.
         # Here the lambda function corresponds to the encoder-decoder cross-attention.
@@ -509,10 +514,14 @@ class DecoderLayer(nn.Module):
             target_representations_batch, decoder_target_cross_attn
         )
 
+        print("Completed second sublayer")
+
         # Apply the feed-forward network, followed by the third sublayer norm dropout + residual connection
         target_representations_batch = self.sublayers[2](
             target_representations_batch, self.feed_forward
         )
+
+        print("Completed third sublayer")
 
         # Return the final output
         return target_representations_batch
@@ -666,10 +675,13 @@ class ScaledDotProductAttention(nn.Module):
         # matmul: (batch_size, num_heads, seq_len, d_k) x (batch_size, num_heads, d_k, seq_len)
         # result: (batch_size, num_heads, seq_len, seq_len)
         scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
+        print("scores shape:", scores.shape)
 
         # Apply mask if provided - set masked positions to -inf before softmax
+        # mask shape = (B, 1, 1, S) or (B, 1, T, T) will get broad-casted (copied) as needed to match scores shape
+        print("mask shape:", mask.shape)
         if mask is not None:
-            scores = scores.masked_fill(mask == 0, -1e9)
+            scores = scores.masked_fill_(mask == torch.tensor(False), -1e9)
 
         # Apply softmax to get attention weights
         attention_weights = F.softmax(scores, dim=-1)
@@ -738,11 +750,11 @@ class MultiHeadAttention(nn.Module):
             .transpose(1, 2)
         )
 
-        # Adjust mask for multiple heads if provided
-        if mask is not None:
-            # Expand mask to have the same batch size and number of heads
-            # (batch_size, 1, seq_len, seq_len) -> (batch_size, num_heads, seq_len, seq_len)
-            mask = mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1)
+        # # Adjust mask for multiple heads if provided
+        # if mask is not None:
+        #     # Expand mask to have the same batch size and number of heads
+        #     # (batch_size, 1, seq_len, seq_len) -> (batch_size, num_heads, seq_len, seq_len)
+        #     mask = mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1)
 
         # Apply scaled dot-product attention
         attn_output, attention_weights = self.attention(q, k, v, mask)
@@ -826,25 +838,24 @@ class PositionalEncoding(nn.Module):
         pe[:, 1::2] = torch.cos(position * frequencies)
 
         # Add batch dimension and register as buffer
-        pe = pe.unsqueeze(0)
         self.register_buffer("pe", pe)
 
     def forward(self, batch_embeddings):
 
         # check for valid input dimensions
         assert (
-            batch_embeddings.dim() == 3
-        ), f"batch_embeddings must be a 3D tensor, got {batch_embeddings.dim()}D"
-
-        assert (
-            batch_embeddings.shape[-1] == self.pe.shape[1]
-        ), f"Expected (batch_size, max_seq_length, model_dimension) as input, got {batch_embeddings.shape}, expected {self.pe.shape}"
+            batch_embeddings.ndim == 3
+            and batch_embeddings.shape[-1] == self.pe.shape[1]
+        ), f"Expected (batch size, max token sequence length, model dimension) got {batch_embeddings.shape}"
 
         # Batch embeddings has shape (batch_size, max_seq_length, model_dimension)
         # where max_seq_length is the maximum sequence length of the batch (max out of source or target sequences)
         # the positional encoding will then have shape (max_seq_length, model_dimension),
         # which is broadcastable to the batch embeddings (batch_size, max_seq_length, model_dimension)
         positional_encoding = self.pe[: batch_embeddings.size(1)]
+
+        print("positional_encoding shape:", positional_encoding.shape)
+        print("batch_embeddings shape:", batch_embeddings.shape)
 
         # Add positional encoding to input embeddings with broadcasting from (max_seq_length, model_dimension) to (batch_size, max_seq_length, model_dimension)
         batch_embeddings = batch_embeddings + positional_encoding
