@@ -26,6 +26,7 @@ import torch.optim as optim
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, TensorDataset
 from transformer import BOS_TOKEN, EOS_TOKEN, PAD_TOKEN, UNK_TOKEN, Transformer
+from transformers import PreTrainedTokenizerFast
 
 # Set seed for reproducibility
 torch.manual_seed(42)
@@ -38,56 +39,67 @@ END_IDX = 2
 UNK_IDX = 3
 
 
-class Vocabulary:
-    """
-    Vocabulary class to convert tokens to indices and vice versa.
-    Similar to Keras Tokenizer but simpler and PyTorch-friendly.
-    """
+# Modern vocabulary approach using HuggingFace
+class HFVocabulary:
+    """Modern vocabulary class using HuggingFace tokenizers."""
 
     def __init__(self):
-        self.token_to_idx = {
-            PAD_TOKEN: PAD_IDX,
-            BOS_TOKEN: START_IDX,
-            EOS_TOKEN: END_IDX,
-            UNK_TOKEN: UNK_IDX,
-        }
-        self.idx_to_token = {
-            PAD_IDX: PAD_TOKEN,
-            START_IDX: BOS_TOKEN,
-            END_IDX: EOS_TOKEN,
-            UNK_IDX: UNK_TOKEN,
-        }
-        self.num_words = len(self.token_to_idx)
+        """Initialize tokenizer with basic configuration."""
+        # Create a new tokenizer from scratch - alternatively could use a pretrained one
+        self.tokenizer = PreTrainedTokenizerFast(
+            tokenizer_object=None,  # We'll train it from scratch
+            unk_token=UNK_TOKEN,
+            pad_token=PAD_TOKEN,
+            bos_token=BOS_TOKEN,
+            eos_token=EOS_TOKEN,
+        )
+        # For compatbility with the rest of the code
+        self.PAD_IDX = self.tokenizer.pad_token_id
+        self.UNK_IDX = self.tokenizer.unk_token_id
+        self.BOS_IDX = self.tokenizer.bos_token_id
+        self.EOS_IDX = self.tokenizer.eos_token_id
 
     def fit_on_texts(self, texts):
-        """Build vocabulary from list of texts."""
+        """Build vocabulary from list of texts.
+
+        In HuggingFace, we'd typically use a tokenizer.train_new_from_iterator method,
+        but for simplicity and compatibility, we'll create a basic word-level vocabulary.
+        """
+        # Create a corpus for training the tokenizer
+        words = set()
         for text in texts:
-            for token in text.split():
-                if token not in self.token_to_idx:
-                    self.token_to_idx[token] = self.num_words
-                    self.idx_to_token[self.num_words] = token
-                    self.num_words += 1
+            words.update(text.split())
+
+        # Add words to the tokenizer's vocabulary
+        self.tokenizer.add_tokens(list(words))
+
+        # For compatibility
+        self.num_words = len(self.tokenizer)
 
     def texts_to_sequences(self, texts):
         """Convert list of texts to list of sequences of indices."""
+        # Use the tokenizer to encode the texts
         sequences = []
         for text in texts:
-            sequence = []
-            for token in text.split():
-                sequence.append(self.token_to_idx.get(token, UNK_IDX))
-            sequences.append(sequence)
+            # Encode without special tokens for compatibility
+            encoded = self.tokenizer.encode(text, add_special_tokens=False)
+            sequences.append(encoded)
         return sequences
 
     def sequences_to_texts(self, sequences):
         """Convert list of sequences of indices to list of texts."""
         texts = []
         for sequence in sequences:
-            text = []
-            for idx in sequence:
-                if idx != PAD_IDX:  # Skip padding
-                    text.append(self.idx_to_token.get(idx, UNK_TOKEN))
-            texts.append(" ".join(text))
+            # Filter out padding tokens
+            filtered_sequence = [idx for idx in sequence if idx != self.PAD_IDX]
+            # Decode the sequence
+            text = self.tokenizer.decode(filtered_sequence, skip_special_tokens=True)
+            texts.append(text)
         return texts
+
+
+# Use the new vocabulary class
+Vocabulary = HFVocabulary
 
 
 def clean_text(text):
