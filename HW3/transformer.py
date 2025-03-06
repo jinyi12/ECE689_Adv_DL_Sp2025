@@ -29,10 +29,10 @@ os.makedirs(BINARIES_PATH, exist_ok=True)
 os.makedirs(DATA_DIR_PATH, exist_ok=True)
 
 
-BOS_TOKEN = "<s>"
-EOS_TOKEN = "</s>"
-PAD_TOKEN = "<pad>"
-UNK_TOKEN = "<unk>"
+BOS_TOKEN = 1
+EOS_TOKEN = 2
+PAD_TOKEN = 0
+UNK_TOKEN = 3
 
 
 # ---- Transformer Modules ----
@@ -192,10 +192,10 @@ class Transformer(nn.Module):
         """
         if start_symbol is None:
             # Default to using the BOS token index as the start symbol
-            start_symbol = 0  # Replace with actual BOS token index if needed
+            start_symbol = 1  # Replace with actual BOS token index if needed
         if eos_token is None:
             # Optionally set a default EOS token index; adjust as necessary for your vocabulary.
-            eos_token = 1
+            eos_token = 2
 
         batch_size = src.size(0)
         device = src.device
@@ -221,6 +221,7 @@ class Transformer(nn.Module):
             prob = self.generator(out[:, -1])
             # Find the highest probability token
             _, next_word = torch.max(prob, dim=1)
+            print(f"Iteration {i}: next_word = {next_word.tolist()}")
 
             # For any sentence that has finished generating (i.e. already produced EOS),
             # force the next word to remain the EOS token.
